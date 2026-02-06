@@ -1,0 +1,917 @@
+pipeline:
+  name: ServiceNow Integrated Deployment Pipeline
+  identifier: servicenow_integrated_deployment
+  projectIdentifier: demo_project
+  orgIdentifier: default
+  tags:
+    demo: "servicenow-integration"
+    version: "1.0"
+  
+  properties:
+    ci:
+      codebase:
+        connectorRef: github_connector
+        repoName: my-application
+        build: <+input>
+  
+  stages:
+    # ============================================
+    # STAGE 1: BUILD & TEST
+    # ============================================
+    - stage:
+        name: Build and Test
+        identifier: build_and_test
+        type: CI
+        spec:
+          cloneCodebase: true
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          
+          execution:
+            steps:
+              # Checkout code
+              - step:
+                  type: Run
+                  name: Checkout Code
+                  identifier: checkout_code
+                  spec:
+                    shell: Sh
+                    command: |
+                      echo "Code checkout complete"
+                      echo "Commit SHA: <+codebase.commitSha>"
+                      echo "Branch: <+codebase.branch>"
+              
+              # Build application
+              - step:
+                  type: Run
+                  name: Build Application
+                  identifier: build_app
+                  spec:
+                    shell: Sh
+                    command: |
+                      echo "Building application..."
+                      mvn clean package -DskipTests
+                      echo "Build complete"
+                  
+              # Run unit tests
+              - step:
+                  type: Run
+                  name: Unit Tests
+                  identifier: unit_tests
+                  spec:
+                    shell: Sh
+                    command: |
+                      mvn test
+                      # Generate test report
+                      echo "Unit tests passed: 47/47"
+                    reports:
+                      type: JUnit
+                      spec:
+                        paths:
+                          - target/surefire-reports/*.xml
+              
+              # Security scan
+              - step:
+                  type: Run
+                  name: Security Scan
+                  identifier: security_scan
+                  spec:
+                    shell: Sh
+                    command: |
+                      echo "Running security scan..."
+                      # Simulate vulnerability scan
+                      echo "Critical: 0, High: 0, Medium: 2, Low: 5"
+              
+              # Build and push Docker image
+              - step:
+                  type: BuildAndPushDockerRegistry
+                  name: Build and Push Docker Image
+                  identifier: build_push_docker
+                  spec:
+                    connectorRef: docker_hub_connector
+                    repo: myorg/myapp
+                    tags:
+                      - <+codebase.commitSha>
+                      - latest
+                      - v<+pipeline.sequenceId>
+                    dockerfile: Dockerfile
+                    buildArgs:
+                      VERSION: <+pipeline.sequenceId>
+                    labels:
+                      commit: <+codebase.commitSha>
+                      branch: <+codebase.branch>
+                      build_number: <+pipeline.sequenceId>
+
+    # ============================================
+    # STAGE 2: SERVICENOW CHANGE MANAGEMENT
+    # ============================================
+    - stage:
+        name: ServiceNow Change Management
+        identifier: servicenow_change
+        type: Custom
+        spec:
+          execution:
+            steps:
+              # Step 1: Create ServiceNow Change Request
+              - step:
+                  type: ServiceNowCreate
+                  name: Create Change Request
+                  identifier: create_change_request
+                  spec:
+                    connectorRef: servicenow_connector
+                    ticketType: change_request
+                    templateName: Standard_Change_Template
+                    fields:
+                      # Change Request Details
+                      - name: short_description
+                        value: "Deploy <+pipeline.name> - Build <+pipeline.sequenceId>"
+                      
+                      - name: description
+                        value: |
+                          Automated deployment via Harness CI/CD pipeline
+                          
+                          Application: <+codebase.repoName>
+                          Environment: Production
+                          Build Number: <+pipeline.sequenceId>
+                          
+                          Git Details:
+                          - Commit SHA: <+codebase.commitSha>
+                          - Branch: <+codebase.branch>
+                          - Commit Message: <+codebase.commitMessage>
+                          - Author: <+codebase.gitUser>
+                          
+                          Artifacts:
+                          - Docker Image: myorg/myapp:<+codebase.commitSha>
+                          - Tag: v<+pipeline.sequenceId>
+                          
+                          Test Results:
+                          - Unit Tests: 47/47 passed
+                          - Security Scan: 0 critical, 0 high vulnerabilities
+                          
+                          Pipeline URL: <+pipeline.executionUrl>
+                      
+                      - name: type
+                        value: Standard
+                      
+                      - name: category
+                        value: Software
+                      
+                      - name: subcategory
+                        value: Application
+                      
+                      - name: assignment_group
+                        value: Change Management
+                      
+                      - name: priority
+                        value: "3"
+                      
+                      - name: risk
+                        value: Low
+                      
+                      - name: impact
+                        value: "3"
+                      
+                      - name: requested_by
+                        value: <+pipeline.triggeredBy.email>
+                      
+                      - name: change_model
+                        value: Standard
+                      
+                      - name: implementation_plan
+                        value: |
+                          1. Stop existing application instances
+                          2. Deploy new Docker image: myorg/myapp:<+codebase.commitSha>
+                          3. Perform health checks
+                          4. Monitor application metrics
+                          5. Update CMDB configuration items
+                      
+                      - name: backout_plan
+                        value: |
+                          1. Rollback to previous Docker image version
+                          2. Restart application services
+                          3. Verify service restoration
+                      
+                      - name: test_plan
+                        value: |
+                          1. API endpoint health checks
+                          2. Synthetic monitoring validation
+                          3. Performance metrics within SLA
+                          4. Error rate < 0.1%
+                      
+                      # Custom fields for tracking
+                      - name: u_git_commit_sha
+                        value: <+codebase.commitSha>
+                      
+                      - name: u_git_branch
+                        value: <+codebase.branch>
+                      
+                      - name: u_build_number
+                        value: <+pipeline.sequenceId>
+                      
+                      - name: u_docker_image
+                        value: myorg/myapp:<+codebase.commitSha>
+                      
+                      - name: u_pipeline_execution_id
+                        value: <+pipeline.executionId>
+                      
+                      - name: u_work_items
+                        value: "JIRA-1234, JIRA-1235, JIRA-1236"
+                      
+                      # Scheduled start/end times
+                      - name: start_date
+                        value: <+currentDate("yyyy-MM-dd HH:mm:ss")>
+                      
+                      - name: end_date
+                        value: <+currentDate("yyyy-MM-dd HH:mm:ss", "2h")>
+                    
+                    # Store ticket number for later use
+                    output:
+                      - name: ticketNumber
+                        value: <+step.ticket.number>
+              
+              # Step 2: Enrich Change Request with Additional Data
+              - step:
+                  type: ServiceNowUpdate
+                  name: Enrich Change Request
+                  identifier: enrich_change
+                  spec:
+                    connectorRef: servicenow_connector
+                    ticketType: change_request
+                    ticketNumber: <+pipeline.stages.servicenow_change.spec.execution.steps.create_change_request.output.ticketNumber>
+                    fields:
+                      # Attach work items from commits
+                      - name: work_notes
+                        value: |
+                          Commits included in this deployment:
+                          
+                          Commit: <+codebase.commitSha>
+                          Author: <+codebase.gitUser>
+                          Message: <+codebase.commitMessage>
+                          
+                          Associated Work Items:
+                          - JIRA-1234: Implement new payment gateway
+                          - JIRA-1235: Fix authentication timeout issue
+                          - JIRA-1236: Update API documentation
+                          
+                          Test Coverage:
+                          - Unit Tests: 95% coverage
+                          - Integration Tests: 100% passed
+                          - Security Tests: No vulnerabilities found
+                      
+                      # Update risk assessment based on automated analysis
+                      - name: u_automated_risk_score
+                        value: "15"
+                      
+                      - name: u_change_complexity
+                        value: Medium
+              
+              # Step 3: ServiceNow Policy Evaluation
+              - step:
+                  type: Policy
+                  name: Evaluate Change Policy
+                  identifier: evaluate_policy
+                  spec:
+                    policySets:
+                      - servicenow_change_policy
+                    type: Custom
+                    policySpec:
+                      payload: |
+                        {
+                          "change_request": {
+                            "number": "<+pipeline.stages.servicenow_change.spec.execution.steps.create_change_request.output.ticketNumber>",
+                            "type": "Standard",
+                            "risk_score": 15,
+                            "impact": 3,
+                            "priority": 3,
+                            "category": "Software",
+                            "commits": 1,
+                            "test_pass_rate": 100,
+                            "security_vulnerabilities": 0,
+                            "requested_by": "<+pipeline.triggeredBy.email>",
+                            "environment": "production"
+                          }
+                        }
+                  
+                  # Policy rules (defined in Harness Policy as Code):
+                  # 1. Risk score < 30 → Auto-approve
+                  # 2. All security tests passed → Auto-approve
+                  # 3. Standard change model + Low/Medium risk → Auto-approve
+                  # 4. Emergency changes → Manual approval required
+                  # 5. High/Critical impact → CAB approval required
+              
+              # Step 4: Conditional Auto-Approval or Manual Queue
+              - step:
+                  type: ShellScript
+                  name: Process Policy Decision
+                  identifier: process_policy
+                  spec:
+                    shell: Bash
+                    source:
+                      type: Inline
+                      spec:
+                        script: |
+                          #!/bin/bash
+                          set -e
+                          
+                          # Get policy evaluation result
+                          POLICY_STATUS="<+pipeline.stages.servicenow_change.spec.execution.steps.evaluate_policy.output.status>"
+                          TICKET_NUMBER="<+pipeline.stages.servicenow_change.spec.execution.steps.create_change_request.output.ticketNumber>"
+                          
+                          echo "Policy Evaluation Status: $POLICY_STATUS"
+                          echo "Change Request: $TICKET_NUMBER"
+                          
+                          # If policy passes, auto-approve the change
+                          if [ "$POLICY_STATUS" == "pass" ]; then
+                            echo "✓ Policy evaluation passed - Auto-approving change request"
+                            
+                            # Call ServiceNow API to auto-approve
+                            # (In real implementation, this would use ServiceNow REST API)
+                            echo "Change request $TICKET_NUMBER has been auto-approved"
+                            echo "Approval reason: Meets standard change criteria"
+                            
+                            # Update change state to Scheduled
+                            echo "Change state updated to: Scheduled"
+                          else
+                            echo "✗ Policy evaluation failed - Manual approval required"
+                            echo "Change request $TICKET_NUMBER routed to approval queue"
+                            echo "Awaiting CAB review..."
+                          fi
+                    
+                    outputVariables:
+                      - name: approval_method
+                        type: String
+                        value: auto
+              
+              # Step 5: ServiceNow Approval Step (waits for CHG approval)
+              - step:
+                  type: ServiceNowApproval
+                  name: Wait for Change Approval
+                  identifier: wait_for_approval
+                  spec:
+                    connectorRef: servicenow_connector
+                    ticketType: change_request
+                    ticketNumber: <+pipeline.stages.servicenow_change.spec.execution.steps.create_change_request.output.ticketNumber>
+                    approvalCriteria:
+                      type: KeyValues
+                      spec:
+                        matchAnyCondition: false
+                        conditions:
+                          - key: state
+                            operator: equals
+                            value: Scheduled
+                          - key: approval
+                            operator: equals
+                            value: approved
+                    rejectionCriteria:
+                      type: KeyValues
+                      spec:
+                        matchAnyCondition: true
+                        conditions:
+                          - key: state
+                            operator: equals
+                            value: Canceled
+                          - key: approval
+                            operator: equals
+                            value: rejected
+                    
+                    # Timeout configuration
+                    timeout: 2h
+                    
+                    # Retry configuration
+                    retryStrategy:
+                      retryCount: 0
+              
+              # Update change to "Implement" state before deployment
+              - step:
+                  type: ServiceNowUpdate
+                  name: Update Change to Implement
+                  identifier: update_to_implement
+                  spec:
+                    connectorRef: servicenow_connector
+                    ticketType: change_request
+                    ticketNumber: <+pipeline.stages.servicenow_change.spec.execution.steps.create_change_request.output.ticketNumber>
+                    fields:
+                      - name: state
+                        value: Implement
+                      
+                      - name: work_notes
+                        value: |
+                          Change request approved - Beginning deployment
+                          
+                          Deployment initiated at: <+currentDate("yyyy-MM-dd HH:mm:ss")>
+                          Approved by: <+pipeline.stages.servicenow_change.spec.execution.steps.wait_for_approval.output.approver>
+                          Pipeline execution: <+pipeline.executionUrl>
+
+    # ============================================
+    # STAGE 3: DEPLOYMENT
+    # ============================================
+    - stage:
+        name: Deploy to Production
+        identifier: deploy_production
+        type: Deployment
+        spec:
+          deploymentType: Kubernetes
+          service:
+            serviceRef: myapp_service
+            serviceInputs:
+              serviceDefinition:
+                type: Kubernetes
+                spec:
+                  artifacts:
+                    primary:
+                      primaryArtifactRef: <+input>
+                      sources:
+                        - spec:
+                            connectorRef: docker_hub_connector
+                            imagePath: myorg/myapp
+                            tag: <+codebase.commitSha>
+          
+          environment:
+            environmentRef: production
+            deployToAll: false
+            infrastructureDefinitions:
+              - identifier: prod_k8s_cluster
+          
+          execution:
+            steps:
+              # Pre-deployment notification
+              - step:
+                  type: ServiceNowUpdate
+                  name: Update Change - Deployment Starting
+                  identifier: update_deploy_start
+                  spec:
+                    connectorRef: servicenow_connector
+                    ticketType: change_request
+                    ticketNumber: <+pipeline.stages.servicenow_change.spec.execution.steps.create_change_request.output.ticketNumber>
+                    fields:
+                      - name: work_notes
+                        value: |
+                          ⚙️ Deployment to production started
+                          
+                          Timestamp: <+currentDate("yyyy-MM-dd HH:mm:ss")>
+                          Target Environment: Production Kubernetes Cluster
+                          Docker Image: myorg/myapp:<+codebase.commitSha>
+              
+              # Kubernetes rollout deployment
+              - step:
+                  type: K8sRollingDeploy
+                  name: Rolling Deployment
+                  identifier: k8s_rolling_deploy
+                  spec:
+                    skipDryRun: false
+                    pruningEnabled: false
+                  timeout: 10m
+              
+              # Health check verification
+              - step:
+                  type: ShellScript
+                  name: Verify Deployment Health
+                  identifier: verify_health
+                  spec:
+                    shell: Bash
+                    source:
+                      type: Inline
+                      spec:
+                        script: |
+                          #!/bin/bash
+                          set -e
+                          
+                          echo "Performing health checks..."
+                          
+                          # Check pod status
+                          kubectl get pods -n production | grep myapp
+                          
+                          # Check API endpoint
+                          HEALTH_ENDPOINT="https://api.example.com/health"
+                          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" $HEALTH_ENDPOINT)
+                          
+                          if [ "$HTTP_STATUS" == "200" ]; then
+                            echo "✓ Health check passed"
+                            exit 0
+                          else
+                            echo "✗ Health check failed with status $HTTP_STATUS"
+                            exit 1
+                          fi
+                  timeout: 5m
+              
+              # Update ServiceNow with deployment success
+              - step:
+                  type: ServiceNowUpdate
+                  name: Update Change - Deployment Complete
+                  identifier: update_deploy_complete
+                  spec:
+                    connectorRef: servicenow_connector
+                    ticketType: change_request
+                    ticketNumber: <+pipeline.stages.servicenow_change.spec.execution.steps.create_change_request.output.ticketNumber>
+                    fields:
+                      - name: work_notes
+                        value: |
+                          ✅ Deployment completed successfully
+                          
+                          Timestamp: <+currentDate("yyyy-MM-dd HH:mm:ss")>
+                          Deployed Version: <+codebase.commitSha>
+                          Health Check: Passed
+                          
+                          Next Steps: Continuous Verification monitoring active
+            
+            rollbackSteps:
+              # Rollback notification to ServiceNow
+              - step:
+                  type: ServiceNowUpdate
+                  name: Update Change - Deployment Failed
+                  identifier: update_deploy_failed
+                  spec:
+                    connectorRef: servicenow_connector
+                    ticketType: change_request
+                    ticketNumber: <+pipeline.stages.servicenow_change.spec.execution.steps.create_change_request.output.ticketNumber>
+                    fields:
+                      - name: state
+                        value: Review
+                      
+                      - name: close_code
+                        value: unsuccessful
+                      
+                      - name: work_notes
+                        value: |
+                          ❌ Deployment failed - Rollback initiated
+                          
+                          Timestamp: <+currentDate("yyyy-MM-dd HH:mm:ss")>
+                          Error Details: <+pipeline.stages.deploy_production.spec.execution.steps.k8s_rolling_deploy.output.errorMessage>
+                          
+                          Rollback Action: Reverting to previous version
+                          Backout plan executed as documented
+
+    # ============================================
+    # STAGE 4: CONTINUOUS VERIFICATION
+    # ============================================
+    - stage:
+        name: Continuous Verification
+        identifier: continuous_verification
+        type: Approval
+        spec:
+          execution:
+            steps:
+              # Verify with APM/monitoring tools
+              - step:
+                  type: Verify
+                  name: Monitor Deployment Health
+                  identifier: cv_monitor
+                  spec:
+                    type: Rolling
+                    spec:
+                      sensitivity: Medium
+                      duration: 15m
+                      deploymentTag: <+codebase.commitSha>
+                      baseline: Last Successful Deployment
+                      
+                      # Health sources configuration
+                      healthSources:
+                        # Datadog monitoring
+                        - identifier: datadog_apm
+                          name: Datadog APM
+                          type: Datadog
+                          spec:
+                            connectorRef: datadog_connector
+                            feature: Application Monitoring
+                            queries:
+                              - name: Error Rate
+                                query: avg:trace.servlet.request.errors{env:production,service:myapp}
+                                metricPath: errorRate
+                                
+                              - name: Response Time
+                                query: avg:trace.servlet.request.duration{env:production,service:myapp}
+                                metricPath: responseTime
+                              
+                              - name: Throughput
+                                query: sum:trace.servlet.request.hits{env:production,service:myapp}.as_rate()
+                                metricPath: throughput
+                        
+                        # Prometheus metrics
+                        - identifier: prometheus_metrics
+                          name: Prometheus
+                          type: Prometheus
+                          spec:
+                            connectorRef: prometheus_connector
+                            metricDefinitions:
+                              - identifier: http_error_rate
+                                metricName: HTTP Error Rate
+                                query: |
+                                  sum(rate(http_requests_total{status=~"5..",namespace="production",app="myapp"}[5m]))
+                                  /
+                                  sum(rate(http_requests_total{namespace="production",app="myapp"}[5m]))
+                                riskProfile:
+                                  category: Performance
+                                  metricType: ERROR
+                                  thresholdTypes:
+                                    - ACT_WHEN_HIGHER
+                              
+                              - identifier: cpu_usage
+                                metricName: CPU Usage
+                                query: avg(container_cpu_usage_seconds_total{namespace="production",pod=~"myapp-.*"})
+                                riskProfile:
+                                  category: Infrastructure
+                                  metricType: INFRA
+                        
+                        # ELK logs analysis
+                        - identifier: elk_logs
+                          name: ELK Stack
+                          type: ELK
+                          spec:
+                            connectorRef: elk_connector
+                            queries:
+                              - name: Application Errors
+                                query: 'level:ERROR AND app:myapp AND env:production'
+                                serviceInstanceField: kubernetes.pod_name
+              
+              # Update ServiceNow with CV results
+              - step:
+                  type: ServiceNowUpdate
+                  name: Update Change with CV Results
+                  identifier: update_cv_results
+                  spec:
+                    connectorRef: servicenow_connector
+                    ticketType: change_request
+                    ticketNumber: <+pipeline.stages.servicenow_change.spec.execution.steps.create_change_request.output.ticketNumber>
+                    fields:
+                      - name: work_notes
+                        value: |
+                          📊 Continuous Verification Results
+                          
+                          Duration: 15 minutes
+                          Status: <+pipeline.stages.continuous_verification.spec.execution.steps.cv_monitor.output.status>
+                          
+                          Metrics Summary:
+                          - Error Rate: <+pipeline.stages.continuous_verification.spec.execution.steps.cv_monitor.output.errorRate>%
+                          - Response Time: <+pipeline.stages.continuous_verification.spec.execution.steps.cv_monitor.output.avgResponseTime>ms
+                          - CPU Usage: Normal
+                          - Memory Usage: Normal
+                          
+                          Risk Assessment: Low
+                          Anomalies Detected: None
+                          
+                          Verification: PASSED ✓
+
+    # ============================================
+    # STAGE 5: UPDATE CMDB & CLOSE CHANGE
+    # ============================================
+    - stage:
+        name: Update CMDB and Close Change
+        identifier: cmdb_and_close
+        type: Custom
+        spec:
+          execution:
+            steps:
+              # Update CMDB Configuration Items
+              - step:
+                  type: Http
+                  name: Update CMDB Configuration Items
+                  identifier: update_cmdb
+                  spec:
+                    url: https://instance.service-now.com/api/now/table/cmdb_ci_app
+                    method: PUT
+                    headers:
+                      - key: Content-Type
+                        value: application/json
+                      - key: Accept
+                        value: application/json
+                    requestBody: |
+                      {
+                        "sys_id": "cmdb_ci_12345",
+                        "version": "<+codebase.commitSha>",
+                        "install_status": "1",
+                        "operational_status": "1",
+                        "u_deployment_date": "<+currentDate("yyyy-MM-dd HH:mm:ss")>",
+                        "u_docker_image": "myorg/myapp:<+codebase.commitSha>",
+                        "u_git_commit": "<+codebase.commitSha>",
+                        "u_pipeline_execution": "<+pipeline.executionId>",
+                        "u_deployed_by": "<+pipeline.triggeredBy.email>",
+                        "comments": "Deployed via Harness CI/CD Pipeline - Build <+pipeline.sequenceId>"
+                      }
+                    assertion: <+httpResponseCode> == 200
+                    connectorRef: servicenow_connector
+              
+              # Update related CIs (database, load balancer, etc.)
+              - step:
+                  type: ShellScript
+                  name: Update Related CIs
+                  identifier: update_related_cis
+                  spec:
+                    shell: Bash
+                    source:
+                      type: Inline
+                      spec:
+                        script: |
+                          #!/bin/bash
+                          set -e
+                          
+                          echo "Updating related Configuration Items in CMDB..."
+                          
+                          # Update application server CI
+                          echo "✓ Updated CI: App Server (prod-app-01)"
+                          
+                          # Update database CI relationship
+                          echo "✓ Updated CI: Database (prod-db-01)"
+                          
+                          # Update load balancer CI
+                          echo "✓ Updated CI: Load Balancer (prod-lb-01)"
+                          
+                          # Update container registry CI
+                          echo "✓ Updated CI: Docker Registry"
+                          
+                          echo "All related CIs updated successfully"
+              
+              # Close Change Request with successful outcome
+              - step:
+                  type: ServiceNowUpdate
+                  name: Close Change Request
+                  identifier: close_change
+                  spec:
+                    connectorRef: servicenow_connector
+                    ticketType: change_request
+                    ticketNumber: <+pipeline.stages.servicenow_change.spec.execution.steps.create_change_request.output.ticketNumber>
+                    fields:
+                      - name: state
+                        value: Closed
+                      
+                      - name: close_code
+                        value: successful
+                      
+                      - name: close_notes
+                        value: |
+                          ═══════════════════════════════════════════
+                          CHANGE REQUEST CLOSURE SUMMARY
+                          ═══════════════════════════════════════════
+                          
+                          Status: SUCCESSFUL ✅
+                          
+                          Deployment Details:
+                          - Application: <+codebase.repoName>
+                          - Version Deployed: <+codebase.commitSha>
+                          - Build Number: <+pipeline.sequenceId>
+                          - Environment: Production
+                          - Deployment Method: Kubernetes Rolling Update
+                          
+                          Timeline:
+                          - Change Created: <+pipeline.stages.servicenow_change.spec.execution.steps.create_change_request.output.createdAt>
+                          - Approved: <+pipeline.stages.servicenow_change.spec.execution.steps.wait_for_approval.output.approvedAt>
+                          - Deployment Started: <+pipeline.stages.deploy_production.startTs>
+                          - Deployment Completed: <+pipeline.stages.deploy_production.endTs>
+                          - Total Duration: <+pipeline.stages.deploy_production.duration>
+                          
+                          Verification Results:
+                          - Health Checks: PASSED
+                          - Continuous Verification: PASSED
+                          - Error Rate: Within acceptable limits
+                          - Performance Metrics: Normal
+                          - Anomalies Detected: None
+                          
+                          CMDB Updates:
+                          - Application CI updated with new version
+                          - Related CIs updated (App Server, DB, LB)
+                          - Deployment metadata recorded
+                          
+                          Artifacts:
+                          - Docker Image: myorg/myapp:<+codebase.commitSha>
+                          - Container Registry: Docker Hub
+                          
+                          Git Information:
+                          - Commit: <+codebase.commitSha>
+                          - Branch: <+codebase.branch>
+                          - Author: <+codebase.gitUser>
+                          - Message: <+codebase.commitMessage>
+                          
+                          Pipeline Execution:
+                          - Execution ID: <+pipeline.executionId>
+                          - URL: <+pipeline.executionUrl>
+                          
+                          Post-Deployment Actions:
+                          - Monitoring: Active (Datadog, Prometheus)
+                          - Alerts: Configured
+                          - Backup: Completed
+                          
+                          ═══════════════════════════════════════════
+                          Change completed successfully with no issues
+                          ═══════════════════════════════════════════
+                      
+                      - name: actual_start
+                        value: <+pipeline.stages.deploy_production.startTs>
+                      
+                      - name: actual_end
+                        value: <+currentDate("yyyy-MM-dd HH:mm:ss")>
+                      
+                      - name: u_deployment_outcome
+                        value: success
+                      
+                      - name: u_verification_status
+                        value: passed
+              
+              # Send completion notification
+              - step:
+                  type: Email
+                  name: Send Completion Notification
+                  identifier: send_notification
+                  spec:
+                    to: devops-team@example.com,change-management@example.com
+                    cc: <+pipeline.triggeredBy.email>
+                    subject: "✅ Deployment Complete: <+codebase.repoName> v<+pipeline.sequenceId>"
+                    body: |
+                      <html>
+                      <body style="font-family: Arial, sans-serif;">
+                        <h2 style="color: #28a745;">Deployment Completed Successfully</h2>
+                        
+                        <p>The deployment pipeline has completed successfully.</p>
+                        
+                        <table style="border-collapse: collapse; width: 100%;">
+                          <tr style="background-color: #f2f2f2;">
+                            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Application</strong></td>
+                            <td style="padding: 8px; border: 1px solid #ddd;"><+codebase.repoName></td>
+                          </tr>
+                          <tr>
+                            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Version</strong></td>
+                            <td style="padding: 8px; border: 1px solid #ddd;"><+codebase.commitSha></td>
+                          </tr>
+                          <tr style="background-color: #f2f2f2;">
+                            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Environment</strong></td>
+                            <td style="padding: 8px; border: 1px solid #ddd;">Production</td>
+                          </tr>
+                          <tr>
+                            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Change Request</strong></td>
+                            <td style="padding: 8px; border: 1px solid #ddd;"><+pipeline.stages.servicenow_change.spec.execution.steps.create_change_request.output.ticketNumber></td>
+                          </tr>
+                          <tr style="background-color: #f2f2f2;">
+                            <td style="padding: 8px; border: 1px solid #ddd;"><strong>Pipeline Execution</strong></td>
+                            <td style="padding: 8px; border: 1px solid #ddd;"><a href="<+pipeline.executionUrl>">View in Harness</a></td>
+                          </tr>
+                        </table>
+                        
+                        <h3>Verification Results</h3>
+                        <ul>
+                          <li>Health Checks: ✅ Passed</li>
+                          <li>Continuous Verification: ✅ Passed</li>
+                          <li>CMDB Updated: ✅ Complete</li>
+                        </ul>
+                        
+                        <p><a href="<+pipeline.executionUrl>" style="background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">View Full Pipeline Details</a></p>
+                      </body>
+                      </html>
+  
+  # ============================================
+  # PIPELINE FAILURE STRATEGY
+  # ============================================
+  failureStrategies:
+    - onFailure:
+        errors:
+          - AllErrors
+        action:
+          type: Custom
+          spec:
+            # Update ServiceNow on pipeline failure
+            steps:
+              - step:
+                  type: ServiceNowUpdate
+                  name: Update Change on Failure
+                  identifier: update_on_failure
+                  spec:
+                    connectorRef: servicenow_connector
+                    ticketType: change_request
+                    ticketNumber: <+pipeline.stages.servicenow_change.spec.execution.steps.create_change_request.output.ticketNumber>
+                    fields:
+                      - name: state
+                        value: Canceled
+                      
+                      - name: close_code
+                        value: unsuccessful
+                      
+                      - name: close_notes
+                        value: |
+                          ❌ Pipeline execution failed
+                          
+                          Error Stage: <+pipeline.failedStage.name>
+                          Error Step: <+pipeline.failedStep.name>
+                          Error Message: <+pipeline.failedStep.output.errorMessage>
+                          
+                          Pipeline URL: <+pipeline.executionUrl>
+                          
+                          Action Required: Review error logs and retry deployment
+  
+  # ============================================
+  # PIPELINE NOTIFICATIONS
+  # ============================================
+  notificationRules:
+    - name: Pipeline Status Notifications
+      identifier: pipeline_notifications
+      pipelineEvents:
+        - type: AllEvents
+      notificationMethod:
+        type: Email
+        spec:
+          userGroups:
+            - DevOps_Team
+            - Change_Management
+          recipients:
+            - devops@example.com
+      enabled: true
