@@ -38,7 +38,7 @@ Instance URL: https://YOUR_INSTANCE.service-now.com
 
 # Test API access
 curl -u harness_automation:PASSWORD \
-  "https://YOUR_INSTANCE.service-now.com/api/now/table/change_request?sysparm_limit=1"
+  GET "https://<InstanceName>.service-now.com/api/now/table/change_request?sysparm_limit=10"
 
 # You should get a JSON response with change requests
 ```
